@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Widget đăng ký doanh nghiệp</title>
+  <!--
+    Widget nhúng 1 iframe: toàn bộ form + GET Redis + STOMP/SockJS nằm trong file này.
+
+    Nhúng ở giao diện khác (thay HOST, SESSION):
+    <iframe src="https://HOST/biz-registration-embed.html?session_id=SESSION"
+      title="Hồ sơ đăng ký doanh nghiệp"
+      style="width:100%;min-height:720px;border:0;display:block" loading="lazy"></iframe>
+
+    Query: session_id (khuyến nghị); hide_header=1 để ẩn tiêu đề.
+    API (/api/...) và /ws cùng origin với URL của file này.
+  -->
+  <style>
+    :root { font-family: system-ui, sans-serif; font-size: 14px; }
+    html, body { height: 100%; }
+    body { margin: 0; padding: 12px; box-sizing: border-box; background: #f6f7f9; }
+    h1 { font-size: 1.1rem; margin: 0 0 8px; }
+    h1.hidden { display: none; }
+    .meta { color: #555; margin-bottom: 12px; font-size: 12px; }
+    .ws { font-size: 12px; margin-bottom: 12px; }
+    .ws.ok { color: #0a7; }
+    .ws.err { color: #c33; }
+    fieldset { margin: 0 0 12px; border: 1px solid #ddd; border-radius: 8px; background: #fff; padding: 10px 12px; }
+    legend { font-weight: 600; padding: 0 6px; }
+    .row { display: grid; grid-template-columns: minmax(140px, 200px) 1fr; gap: 8px 12px; align-items: center; margin-bottom: 8px; }
+    label { color: #333; }
+    input, textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; }
+    textarea { min-height: 52px; resize: vertical; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+</head>
+<body>
+  <h1 id="pageTitle">Hồ sơ đăng ký doanh nghiệp</h1>
+  <div class="meta">session_id: <strong id="sidLabel"></strong></div>
+  <div id="wsStatus" class="ws">WebSocket: đang kết nối…</div>
+
+  <form id="f" onsubmit="return false;">
+    <fieldset>
+      <legend>Thông tin chung</legend>
+      <div class="row"><label for="biz_regLocalDate">Ngày lập hồ sơ</label><input id="biz_regLocalDate" type="date" /></div>
+      <div class="row"><label for="biz_companyProvince">Tỉnh/TP trụ sở</label><input id="biz_companyProvince" /></div>
+      <div class="row"><label for="biz_companyWard">Phường/xã trụ sở</label><input id="biz_companyWard" /></div>
+      <div class="row"><label for="biz_companyAddressDetail">Địa chỉ chi tiết trụ sở</label><input id="biz_companyAddressDetail" /></div>
+      <div class="row"><label for="biz_bizRegOffice">Nơi tiếp nhận hồ sơ</label><input id="biz_bizRegOffice" /></div>
+      <div class="row"><label for="biz_businessRegAuthority">Cơ quan ĐKKD</label><input id="biz_businessRegAuthority" /></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Người đăng ký</legend>
+      <div class="row"><label for="biz_fullName">Họ tên</label><input id="biz_fullName" /></div>
+      <div class="row"><label for="biz_gender">Giới tính</label><input id="biz_gender" /></div>
+      <div class="row"><label for="biz_dateOfBirth">Ngày sinh</label><input id="biz_dateOfBirth" type="date" /></div>
+      <div class="row"><label for="biz_idNumber">Số CCCD/định danh</label><input id="biz_idNumber" /></div>
+      <div class="row"><label for="biz_streetAddress">Địa chỉ cư trú chi tiết</label><input id="biz_streetAddress" /></div>
+      <div class="row"><label for="biz_ward">Phường/xã cư trú</label><input id="biz_ward" /></div>
+      <div class="row"><label for="biz_province">Tỉnh/TP cư trú</label><input id="biz_province" /></div>
+      <div class="row"><label for="biz_country">Quốc gia</label><input id="biz_country" /></div>
+      <div class="row"><label for="biz_phone">Điện thoại</label><input id="biz_phone" /></div>
+      <div class="row"><label for="biz_email">Email</label><input id="biz_email" type="email" /></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Tên công ty</legend>
+      <div class="row"><label for="biz_companyNameVi">Tên tiếng Việt</label><input id="biz_companyNameVi" /></div>
+      <div class="row"><label for="biz_companyNameForeign">Tên nước ngoài</label><input id="biz_companyNameForeign" /></div>
+      <div class="row"><label for="biz_companyNameShort">Tên viết tắt</label><input id="biz_companyNameShort" /></div>
+      <div class="row"><label for="biz_industrialZone">Khu công nghiệp</label><input id="biz_industrialZone" /></div>
+      <div class="row"><label for="biz_borderArea">Khu vực biên giới</label><input id="biz_borderArea" /></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Ngành nghề</legend>
+      <div class="row"><label for="biz_mainBusiness">Ngành chính</label><input id="biz_mainBusiness" /></div>
+      <div class="row"><label for="biz_mainBusinessCode">Mã ngành chính</label><input id="biz_mainBusinessCode" /></div>
+      <div class="row"><label for="biz_subBusiness">Ngành phụ</label><textarea id="biz_subBusiness"></textarea></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Người đại diện pháp luật</legend>
+      <div class="row"><label for="biz_legalFullName">Họ tên</label><input id="biz_legalFullName" /></div>
+      <div class="row"><label for="biz_jobTittle">Chức danh</label><input id="biz_jobTittle" /></div>
+      <div class="row"><label for="biz_legalGender">Giới tính</label><input id="biz_legalGender" /></div>
+      <div class="row"><label for="biz_legalDob">Ngày sinh</label><input id="biz_legalDob" type="date" /></div>
+      <div class="row"><label for="biz_legalIdNumber">CCCD/định danh</label><input id="biz_legalIdNumber" /></div>
+      <div class="row"><label for="biz_legalStreetAddress">Địa chỉ chi tiết</label><input id="biz_legalStreetAddress" /></div>
+      <div class="row"><label for="biz_legalWard">Phường/xã</label><input id="biz_legalWard" /></div>
+      <div class="row"><label for="biz_legalProvince">Tỉnh/TP</label><input id="biz_legalProvince" /></div>
+      <div class="row"><label for="biz_legalCountry">Quốc gia</label><input id="biz_legalCountry" /></div>
+      <div class="row"><label for="biz_legalPhone">Điện thoại</label><input id="biz_legalPhone" /></div>
+      <div class="row"><label for="biz_legalEmail">Email</label><input id="biz_legalEmail" type="email" /></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Chủ sở hữu công ty</legend>
+      <div class="row"><label for="biz_ownerFullName">Họ tên</label><input id="biz_ownerFullName" /></div>
+      <div class="row"><label for="biz_ownerGender">Giới tính</label><input id="biz_ownerGender" /></div>
+      <div class="row"><label for="biz_ownerDob">Ngày sinh</label><input id="biz_ownerDob" type="date" /></div>
+      <div class="row"><label for="biz_ownerIdNumber">CCCD/định danh</label><input id="biz_ownerIdNumber" /></div>
+      <div class="row"><label for="biz_ownerNationality">Quốc tịch</label><input id="biz_ownerNationality" /></div>
+      <div class="row"><label for="biz_ownerPhone">Điện thoại</label><input id="biz_ownerPhone" /></div>
+      <div class="row"><label for="biz_ownerAddress">Địa chỉ</label><input id="biz_ownerAddress" /></div>
+      <div class="row"><label for="biz_ownerEmail">Email</label><input id="biz_ownerEmail" type="email" /></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cấu trúc vốn</legend>
+      <div class="row"><label for="biz_charterCapital">Vốn điều lệ</label><input id="biz_charterCapital" type="number" step="1" /></div>
+      <div class="row"><label for="biz_charterCapitalInWords">Bằng chữ</label><input id="biz_charterCapitalInWords" /></div>
+      <div class="row"><label for="biz_privateCapitalPercent">Vốn tư nhân (%)</label><input id="biz_privateCapitalPercent" type="number" step="0.01" /></div>
+      <div class="row"><label for="biz_foreignCapitalPercent">Vốn nước ngoài (%)</label><input id="biz_foreignCapitalPercent" type="number" step="0.01" /></div>
+      <div class="row"><label for="biz_asset_vnd_percent">Góp vốn VNĐ (%)</label><input id="biz_asset_vnd_percent" type="number" step="0.01" /></div>
+      <div class="row"><label for="biz_asset_foreign_currency_percent">Góp vốn ngoại tệ (%)</label><input id="biz_asset_foreign_currency_percent" type="number" step="0.01" /></div>
+      <div class="row"><label for="biz_asset_other_percent">Góp vốn tài sản khác (%)</label><input id="biz_asset_other_percent" type="number" step="0.01" /></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Thuế &amp; BHXH</legend>
+      <div class="row"><label for="biz_operationStartLocalDate">Ngày bắt đầu HĐ</label><input id="biz_operationStartLocalDate" type="date" /></div>
+      <div class="row"><label for="biz_accountingMethod">Phương pháp hạch toán</label><input id="biz_accountingMethod" /></div>
+      <div class="row"><label for="biz_fiscalYearFrom">Năm tài chính từ</label><input id="biz_fiscalYearFrom" type="date" /></div>
+      <div class="row"><label for="biz_fiscalYearTo">Năm tài chính đến</label><input id="biz_fiscalYearTo" type="date" /></div>
+      <div class="row"><label for="biz_totalEmployees">Tổng lao động dự kiến</label><input id="biz_totalEmployees" type="number" step="1" /></div>
+      <div class="row"><label for="biz_vatMethod">Thuế GTGT</label><input id="biz_vatMethod" /></div>
+      <div class="row"><label for="biz_socialInsuranceMethod">Đóng BHXH</label><input id="biz_socialInsuranceMethod" /></div>
+    </fieldset>
+  </form>
+
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session_id') || 'demo-session-001';
+      const hideHeader = params.get('hide_header') === '1' || params.get('hide_header') === 'true';
+
+      document.getElementById('sidLabel').textContent = sessionId;
+      if (hideHeader) {
+        document.getElementById('pageTitle').classList.add('hidden');
+      }
+
+      function apiUrl(pathWithQuery) {
+        return new URL(pathWithQuery, window.location.origin).toString();
+      }
+
+      function setWs(text, ok) {
+        const el = document.getElementById('wsStatus');
+        el.textContent = 'WebSocket: ' + text;
+        el.className = 'ws ' + (ok === true ? 'ok' : ok === false ? 'err' : '');
+      }
+
+      function fillFromDocument(doc) {
+        if (!doc || typeof doc !== 'object') return;
+        for (const section of Object.values(doc)) {
+          if (!section || typeof section !== 'object') continue;
+          for (const [key, val] of Object.entries(section)) {
+            const node = document.getElementById(key);
+            if (!node) continue;
+            if (val === null || val === undefined) node.value = '';
+            else node.value = String(val);
+          }
+        }
+      }
+
+      fetch(apiUrl('/api/biz-registration?session_id=' + encodeURIComponent(sessionId)))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) { if (j) fillFromDocument(j); })
+        .catch(function () {});
+
+      const client = new StompJs.Client({
+        reconnectDelay: 4000,
+        heartbeatIncoming: 10000,
+        heartbeatOutgoing: 10000,
+        webSocketFactory: function () {
+          return new SockJS(apiUrl('/ws'));
+        },
+      });
+
+      client.onConnect = function () {
+        setWs('đã kết nối — chờ cập nhật từ BE', true);
+        client.subscribe('/topic/biz-session/' + sessionId, function (message) {
+          try {
+            const doc = JSON.parse(message.body);
+            fillFromDocument(doc);
+            setWs('đã nhận dữ liệu từ Redis qua WebSocket', true);
+          } catch (e) {
+            setWs('lỗi parse JSON: ' + e, false);
+          }
+        });
+      };
+
+      client.onStompError = function (frame) {
+        setWs('STOMP lỗi: ' + (frame.headers['message'] || frame.body || 'unknown'), false);
+      };
+
+      client.onWebSocketError = function () {
+        setWs('lỗi socket (kiểm tra BE và đường dẫn /ws)', false);
+      };
+
+      client.activate();
+    })();
+  </script>
+</body>
+</html>
