@@ -2,6 +2,7 @@ package com.test.iframe.fill.demo.web;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -36,21 +37,25 @@ public class BizRegistrationApiController {
 	}
 
 	/**
-	 * Trả về {@link Object} (Map/List/…) để tránh lỗi serialize/kiểu với Jackson 3 trong Spring Web 7.
+	 * Trả về {@code {"result": null}} khi Redis trống; {@code {"result": &lt;object&gt;}} khi có JSON đã lưu.
+	 * Dùng {@link Object} (Map/List/…) để tránh lỗi serialize/kiểu với Jackson 3 trong Spring Web 7.
 	 */
 	@GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
 	public ResponseEntity<Object> get(@RequestParam("session_id") String sessionId) {
-		return bizFormRedisService.loadRaw(sessionId)
-				.map(json -> {
-					try {
-						return ResponseEntity.ok(objectMapper.readValue(json, Object.class));
-					}
-					catch (JsonProcessingException e) {
-						return ResponseEntity.internalServerError()
-								.<Object>body(Map.of("ok", false, "error", e.getMessage()));
-					}
-				})
-				.orElseGet(() -> ResponseEntity.notFound().build());
+		Map<String, Object> envelope = new LinkedHashMap<>();
+		Optional<String> raw = bizFormRedisService.loadRaw(sessionId);
+		if (raw.isEmpty()) {
+			envelope.put("result", null);
+			return ResponseEntity.ok(envelope);
+		}
+		try {
+			envelope.put("result", objectMapper.readValue(raw.get(), Object.class));
+			return ResponseEntity.ok(envelope);
+		}
+		catch (JsonProcessingException e) {
+			return ResponseEntity.internalServerError()
+					.<Object>body(Map.of("ok", false, "error", e.getMessage()));
+		}
 	}
 
 	/**

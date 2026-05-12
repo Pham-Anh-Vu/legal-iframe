@@ -4,6 +4,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -14,6 +16,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 @Service
 public class BizFormRedisService {
+
+	private static final Logger log = LoggerFactory.getLogger(BizFormRedisService.class);
 
 	public static final String KEY_PREFIX = "biz:session:";
 
@@ -36,6 +40,21 @@ public class BizFormRedisService {
 	}
 
 	/**
+	 * Đọc giá trị Redis theo {@code session_id}, đồng thời log key và payload (hoặc trạng thái rỗng).
+	 */
+	private String getRawFromRedisLogged(String sessionId) {
+		String key = redisKey(sessionId);
+		String raw = upstash.get(key).orElse("");
+		if (raw.isBlank()) {
+			log.info("Redis GET session_id={} redisKey={} -> (không có dữ liệu hoặc chuỗi rỗng)", sessionId, key);
+		}
+		else {
+			log.info("Redis GET session_id={} redisKey={} data={}", sessionId, key, raw);
+		}
+		return raw;
+	}
+
+	/**
 	 * Lưu toàn bộ tài liệu đăng ký (các mục giống sample-biz-session.json), không chứa {@code session_id}.
 	 */
 	public void saveDocument(String sessionId, ObjectNode document) throws JsonProcessingException {
@@ -44,12 +63,13 @@ public class BizFormRedisService {
 	}
 
 	public Optional<String> loadRaw(String sessionId) {
-		return upstash.get(redisKey(sessionId)).filter(s -> !s.isBlank());
+		String raw = getRawFromRedisLogged(sessionId);
+		return raw.isBlank() ? Optional.empty() : Optional.of(raw);
 	}
 
 	public Optional<Map<String, Object>> loadFlat(String sessionId) {
-		String raw = upstash.get(redisKey(sessionId)).orElse("");
-		if (raw == null || raw.isBlank()) {
+		String raw = getRawFromRedisLogged(sessionId);
+		if (raw.isBlank()) {
 			return Optional.empty();
 		}
 		try {
@@ -62,8 +82,8 @@ public class BizFormRedisService {
 	}
 
 	public Optional<JsonNode> loadJson(String sessionId) {
-		String raw = upstash.get(redisKey(sessionId)).orElse("");
-		if (raw == null || raw.isBlank()) {
+		String raw = getRawFromRedisLogged(sessionId);
+		if (raw.isBlank()) {
 			return Optional.empty();
 		}
 		try {

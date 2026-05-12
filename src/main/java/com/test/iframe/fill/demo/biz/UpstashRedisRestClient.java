@@ -69,7 +69,7 @@ public class UpstashRedisRestClient {
 		RestClient rc = restClient.orElseThrow(() -> new IllegalStateException(
 				"Upstash REST chưa cấu hình: đặt app.upstash.rest-url và biến môi trường UPSTASH_REDIS_REST_TOKEN"));
 		String responseBody = rc.post()
-				.uri("/set/{key}", redisKey)
+				.uri("/get/{key}", redisKey)
 				.contentType(new MediaType(MediaType.TEXT_PLAIN, StandardCharsets.UTF_8))
 				.body(value)
 				.retrieve()
